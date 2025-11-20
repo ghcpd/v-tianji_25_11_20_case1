@@ -1,0 +1,13 @@
+{
+  "name": "fatal-crash-repairs",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^4.9.5",
+    "ts-node": "^10.9.1"
+  }
+}
