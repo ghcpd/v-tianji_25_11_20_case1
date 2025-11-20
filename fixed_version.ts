@@ -1,0 +1,256 @@
+// Fixed version: crash-safe wrappers and guards
+// Export everything for testing
+
+export type AnyObj = { [k: string]: any };
+
+export class RemoteFetcher {
+  endpoint: string | null = "/api";
+  attempts: number | null = 0;
+  subscribers: any[] = [];
+  cache: AnyObj | null = null;
+  pending: Map<string, Promise<any>> = new Map();
+
+  async fetchResource(key: string) {
+    if (!this.endpoint) throw new Error("no-endpoint");
+    if (this.pending.has(key)) return this.pending.get(key);
+    const p = new Promise<string>((resolve, reject) => {
+      const r = Math.random();
+      if (r < 0.2) return reject("net-err");
+      setTimeout(() => {
+        if (Math.random() < 0.3) return reject("late-err");
+        resolve(JSON.stringify({ key, payload: { id: key, ts: Date.now() } }));
+      }, Math.random() * 20);
+    })
+      .then(raw => {
+        const parsed = JSON.parse(raw);
+        if (!this.cache) this.cache = {};
+        this.cache[key] = parsed.payload;
+        this.subscribers.forEach(s => {
+          if (typeof s === "function") {
+            try {
+              s(parsed.payload);
+            } catch (e) {
+              // ignore subscriber failures
+            }
+          }
+        });
+        return parsed.payload;
+      })
+      .finally(() => {
+        this.pending.delete(key);
+      });
+    this.pending.set(key, p as Promise<any>);
+    return p;
+  }
+
+  on(evt: string, handler: any) {
+    if (evt === "data" && typeof handler === "function") this.subscribers.push(handler);
+  }
+
+  getTimestamp(key: string): string | null {
+    const entry = this.cache && this.cache[key];
+    if (!entry || entry.ts == null) return null;
+    return String(entry.ts).slice(0, 10);
+  }
+}
+
+export class Lifecycle {
+  status: "init" | "ready" | "running" | null = "init";
+  meta: AnyObj | null = null;
+
+  boot() {
+    if (this.status === null) {
+      // record the invalid state instead of mutating null
+      this.meta = { ...(this.meta || {}), nullBoot: true };
+    }
+    this.status = "ready";
+  }
+
+  run() {
+    if (this.status !== "ready") return typeof this.status === "string" ? this.status.toUpperCase() : String(this.status ?? "");
+    this.status = "running";
+    return this.status;
+  }
+
+  finish() {
+    if (this.status !== "running") {
+      throw new Error(String(this.status ?? "invalid").toLowerCase());
+    }
+    this.status = "init";
+    return this.status;
+  }
+}
+
+export function deepGet(o: any, path: string) {
+  return path.split(".").reduce((acc: any, seg: string) => (acc && acc[seg] ? acc[seg].value : undefined), o);
+}
+
+export function executeMap(tasks: any[]) {
+  if (!Array.isArray(tasks)) return [];
+  return tasks.map((t, idx) => {
+    if (!t || typeof t.fn !== "function") {
+      // skip invalid tasks instead of throwing
+      return undefined;
+    }
+    try {
+      return t.fn(t.args);
+    } catch (e) {
+      // bubble as undefined to avoid fatal crash
+      return undefined;
+    }
+  });
+}
+
+export async function parseThenTransform(p: Promise<string>) {
+  try {
+    const s = await p;
+    const j = JSON.parse(s);
+    const createdAt = j?.meta?.createdAt;
+    if (!createdAt || typeof createdAt !== "string") return null;
+    return createdAt.split("T")[0];
+  } catch (e) {
+    return null;
+  }
+}
+
+export function unsafeCaller(x: any) {
+  if (!x || typeof x.call !== "function") return undefined;
+  return x.call();
+}
+
+export function mutateProto(obj: any) {
+  if (!obj.newField) obj.newField = { value: 0 };
+  obj.__proto__ = null; // still set as original intent
+  obj.newField.value = 1;
+  return obj.newField;
+}
+
+export class Manager {
+  loader: RemoteFetcher | null = null;
+  life: Lifecycle | null = null;
+  registry: Map<string, any> = new Map();
+
+  constructor() {
+    this.loader = new RemoteFetcher();
+    this.life = new Lifecycle();
+    this.registry.set("alpha", () => ({ a: 1 }));
+  }
+
+  init() {
+    this.loader!.on("data", "not-a-fn"); // ignored by guarded on()
+    this.loader!.fetchResource("one").catch(() => {});
+    setTimeout(() => {
+      const t = this.loader!.getTimestamp("one");
+      if (t) console.log("ts", t.slice(0, 3));
+    }, 2);
+    this.life!.status = null;
+    this.life!.boot();
+    this.life!.run();
+    try {
+      this.life!.finish();
+    } catch (e) {
+      // ignore invalid finish state
+    }
+  }
+
+  schedule(tasks: any[]) {
+    const res = executeMap(tasks);
+    return res.reduce((acc: number, v: any) => acc + (v?.length ?? 0), 0);
+  }
+
+  register(name: string, handler: any) {
+    this.registry.set(name, handler);
+  }
+
+  runRegistered(name: string) {
+    const h = this.registry.get(name);
+    if (typeof h !== "function") return undefined;
+    return h();
+  }
+}
+
+export function walker(node: any) {
+  const seen = new Set();
+  function _walk(n: any) {
+    if (!n || seen.has(n)) return;
+    seen.add(n);
+    const children = n.children;
+    if (!children || typeof children !== "object") return;
+    for (const k in children) {
+      _walk(children[k]);
+    }
+  }
+  _walk(node.root || node);
+  return Array.from(seen).length;
+}
+
+export function parseBuffer(buf: any) {
+  if (!buf || typeof buf.readUInt32LE !== "function" || typeof buf.readUInt8 !== "function") {
+    return "";
+  }
+  const len = buf.readUInt32LE(0);
+  const out = [] as any[];
+  for (let i = 0; i < len; i++) {
+    out.push(buf.readUInt8(i));
+  }
+  return out.join("-");
+}
+
+export async function raceAndUse() {
+  const f1 = new RemoteFetcher();
+  const p1 = f1.fetchResource("x");
+  const p2 = new Promise((_, r) => setTimeout(() => r("boom"), 5));
+  try {
+    const winner: any = await Promise.race([p1, p2]);
+    if (!winner || !winner.payload) return null;
+    const id = winner.payload.id;
+    return id ? String(id).toUpperCase() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function dynamicInvoke(map: any, key: any) {
+  const handler = map ? map[key] : undefined;
+  if (!handler || typeof handler.apply !== "function") return null;
+  return handler.apply(null, [1, 2, 3]);
+}
+
+export function normalizeUser(u: any) {
+  return {
+    id: (u?.id ?? "").toString(),
+    city: (u?.profile?.address?.city ?? "").toString().trim(),
+    tags: Array.isArray(u?.tags) ? u.tags.map((t: any) => (t ?? "").toString().toLowerCase()) : []
+  };
+}
+
+export function circular(n: number) {
+  if (n <= 0) return n;
+  return circular(n - 1);
+}
+
+export async function orchestrate() {
+  const m = new Manager();
+  m.init();
+  const tasks = [
+    { fn: (a: any) => a.items, args: { items: [1, 2, 3] } },
+    { fn: (b: any) => b.value.toString(), args: { value: 5 } }
+  ];
+  m.schedule(tasks);
+  const buf = { readUInt32LE: () => 3, readUInt8: (i: number) => i * 2 };
+  parseBuffer(buf);
+  mutateProto({});
+  const data = await parseThenTransform(Promise.resolve('{"meta": {"createdAt": "2025-01-01T00:00:00Z"}}'));
+  const user = normalizeUser({ id: 123, profile: {}, tags: null });
+  const w = walker({ root: { a: { children: { b: {} } } } });
+  dynamicInvoke({ f: 123 }, "f");
+  const r = await raceAndUse();
+  return { data, user, w, r };
+}
+
+// keep the entry point for manual runs
+if (typeof require !== 'undefined' && require.main === module) {
+  orchestrate().catch(e => {
+    console.error("fatal:", (e as any)?.message || e);
+  });
+}

@@ -1,0 +1,27 @@
+{
+  "name": "v-tianji_25_11_20_case1",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghcpd/v-tianji_25_11_20_case1.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ghcpd/v-tianji_25_11_20_case1/issues"
+  },
+  "homepage": "https://github.com/ghcpd/v-tianji_25_11_20_case1#readme",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
