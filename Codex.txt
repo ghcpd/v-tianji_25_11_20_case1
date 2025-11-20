@@ -1,0 +1,31 @@
+Crash Paths
+
+Lifecycle.boot (input.ts (line 45)) writes to (this.status as any).flag even when status was forced to null by Manager.init (input.ts (line 108)), so the very first call throws a TypeError and the whole boot sequence dies before anything else can run.
+RemoteFetcher.on/fetchResource (input.ts (lines 25-33)) blindly stores any subscriber and later calls it; Manager.init registers the string "not-a-fn", so the forEach in fetchResource calls a string as a function once "one" resolves, crashing the promise chain.
+RemoteFetcher.getTimestamp (input.ts (line 36)) dereferences this.cache[key] while cache is still null; the timer fired in Manager.init (input.ts (line 104)) thus explodes every time the fetch is still pending.
+mutateProto (input.ts (line 83), invoked in orchestrate at input.ts (line 185)) nulls the prototype and immediately accesses obj.newField.value, but the property never exists, so it throws for every caller.
+walker (input.ts (line 127), called by orchestrate at input.ts (line 188)) assumes every visited node has a children object; the provided root ({ a: { … } }) lacks that field and for…in n.children throws instantly.
+normalizeUser (input.ts (line 162), used at input.ts (line 186)) assumes profile.address.city and tags are always present; with { profile: {}, tags: null } it immediately dereferences undefined.
+dynamicInvoke (input.ts (line 157), used at input.ts (line 189)) always calls .apply on whatever value lies in map[key]; when that value is the number 123 the call crashes immediately.
+raceAndUse (input.ts (line 149)) misinterprets the winner of Promise.race: the fetch already resolves with the payload object { id, ts }, yet the code reads winner.payload.id, so even successful races explode. If the timeout promise rejects first the rejection is also unhandled.
+Manager.runRegistered (input.ts (line 121)) unconditionally calls whatever comes back from the registry; asking for an unknown name means calling undefined() and throwing, so any external consumer can crash the app.
+Fixes & Tests
+
+Hardened RemoteFetcher to accept only callable subscribers and to ignore bad entries when notifying, and made getTimestamp return a safe string even if the cache is empty (fixed_version.ts (lines 15-43)). This resolves both async crashes in Manager.init and keeps cache access deterministic.
+Guarded the entire Lifecycle state machine against null by resetting to "init" before booting and by using fallbacks in run/finish (fixed_version.ts (lines 51-77)), so the lifecycle can be restarted safely.
+Ensured mutateProto always materializes newField before touching value (fixed_version.ts (lines 95-103)), preventing the null-prototype object from blowing up.
+Added null-safe traversal to walker so missing children simply stop recursion instead of throwing (fixed_version.ts (lines 147-156)).
+Manager.runRegistered now validates that the looked-up handler is callable before invoking it (fixed_version.ts (lines 138-142)), protecting registry consumers.
+dynamicInvoke and normalizeUser now gracefully handle non-functions and missing nested data, returning sensible defaults instead of throwing (fixed_version.ts (lines 188-201)).
+raceAndUse now wraps the race, treats the winner as the payload itself, and falls back to "UNKNOWN" if the race fails (fixed_version.ts (lines 171-183)), eliminating both the structural bug and the unhandled rejection.
+To exercise these regressions, I added a Jest/ts-jest harness (package.json, tsconfig.json, jest.config.js) plus a loader helper that strips the top-level orchestrate() invocation and injects exports at runtime (test/loadSource.ts). The comprehensive suite in __tests__/crashes.test.ts reproduces all nine crash paths against the original code (expecting throws/rejections) and verifies that the same scenarios now succeed with fixed_version.ts, covering async fetches, nested property access, dynamic invocation, race handling, and registry usage.
+
+Testing
+
+Not run (Jest dependencies are not installed in this environment). After running npm install, execute npm test to confirm the suite passes. Each spec asserts that the original code path fails while the fixed version succeeds.
+Summary
+
+Crashes found: 9 total.
+Categories: null/undefined access (Lifecycle, cache, walker, nested user data), invalid function invocation (subscribers, dynamicInvoke, registry), unsafe mutation (mutateProto), and async race misuse (raceAndUse).
+The new Jest tests capture every crash path and are designed to fail on input.ts and pass on fixed_version.ts once dependencies are installed.
+Assumptions: returning empty strings/arrays is acceptable when user data is incomplete, and raceAndUse may return "UNKNOWN" when neither branch yields a usable id.
