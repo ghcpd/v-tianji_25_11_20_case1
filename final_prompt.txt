@@ -1,0 +1,69 @@
+Prompt
+Your task is to analyze the provided TypeScript/JavaScript source code, which contains multiple hidden fatal crash paths.
+
+Your responsibilities are:
+
+1. Crash Identification
+
+Identify every runtime crash or unhandled exception in the code.
+
+For each crash, explain:
+
+the exact code location or fragment
+
+why it crashes
+
+the execution path that triggers it
+
+List only fatal crashes, not style issues or non-fatal logic bugs.
+
+2. Produce a Fixed Version in a New File
+
+Create a new file named fixed_version.ts.
+
+This new file must:
+
+preserve all original logic
+
+apply only minimal changes to remove every crash
+
+introduce no regressions
+
+Do not modify the original source file.
+
+3. Generate Runnable Test Cases
+
+You must generate runnable automated tests (using Jest or Vitest).
+
+You may decide the structure, naming, and number of test files.
+
+The tests must:
+
+reproduce every crash you identified
+
+fail when run against the original code
+
+pass when run against your fixed version
+
+include all required setup
+
+cover async behavior, nested access, dynamic invocation, race conditions, and every discovered crash path
+
+The tests must be deterministic, complete, and executable as-is.
+
+4. Final Summary
+
+Provide a final summary including:
+
+the total number of crashes found
+
+main crash categories
+
+confirmation that all tests pass with your fixed version
+
+any assumptions or remaining limitations
+
+Title: Fatal Crash Path Detection & Repair
+
+Description:
+Analyze a complex TypeScript/JavaScript codebase containing multiple hidden fatal crash paths, including null or undefined access, invalid function calls, asynchronous race conditions, deep nested property access, dynamic invocation, and other runtime exceptions. Identify all crashes, produce a fixed version in a new file without modifying the original source, generate real, executable automated tests that reproduce crashes and pass after fixes, and provide a final summary report. Ensure all tests actually run and pass.
